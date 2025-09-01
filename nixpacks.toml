@@ -1,0 +1,3 @@
+# nixpacks.toml
+[start]
+cmd = "python get_channel_subscribers.py"

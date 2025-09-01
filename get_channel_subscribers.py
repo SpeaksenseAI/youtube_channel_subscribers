@@ -2,8 +2,6 @@ import os
 import requests
 import psycopg2
 from dotenv import load_dotenv
-from youtube_transcript_api import YouTubeTranscriptApi as yta
-import asyncio
 
 load_dotenv(".env.local")
 
@@ -16,20 +14,24 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 postgres_url = os.getenv("POSTGRES_URL")
 
+
 def get_subscribers(channel_id):
     url = f"https://www.googleapis.com/youtube/v3/channels?part=statistics&id={channel_id}&key={YOUTUBE_API_KEY}"
     response = requests.get(url)
     if response.status_code == 200:
         data = response.json()
-        if 'items' in data and len(data['items']) > 0:
-            subscribers = data['items'][0]['statistics']['subscriberCount']
+        if "items" in data and len(data["items"]) > 0:
+            subscribers = data["items"][0]["statistics"]["subscriberCount"]
             return int(subscribers)
         else:
             print(f"No data found for channel ID: {channel_id}")
             return None
     else:
-        print(f"Failed to retrieve data for channel ID: {channel_id}, status code: {response.status_code}")
+        print(
+            f"Failed to retrieve data for channel ID: {channel_id}, status code: {response.status_code}"
+        )
         return None
+
 
 def batch_insert_subscribers(channel_ids, postgres_url):
     # Connect to PostgreSQL
@@ -42,16 +44,13 @@ def batch_insert_subscribers(channel_ids, postgres_url):
         try:
             subs = get_subscribers(channel_id)
         except Exception as e:
-            print(f"Error getting transcript for {channel_id}: {e}")
+            print(f"Error getting subscribers for {channel_id}: {e}")
             subs = None
 
-        records.append((
-            channel_id,
-            subs
-            ))
+        records.append((channel_id, subs))
 
     # Insert into the database in batch
-    query = '''
+    query = """
         INSERT INTO channel_subscribers (
             channel_id, subscribers
         )
@@ -59,7 +58,7 @@ def batch_insert_subscribers(channel_ids, postgres_url):
         ON CONFLICT (channel_id) DO UPDATE
         SET 
             subscribers = EXCLUDED.subscribers
-    '''
+    """
     try:
         cursor.executemany(query, records)
         conn.commit()
@@ -70,46 +69,52 @@ def batch_insert_subscribers(channel_ids, postgres_url):
         cursor.close()
         conn.close()
 
-if postgres_url:
+
+def main():
+    """Main function to orchestrate the subscriber fetching process."""
+    if not postgres_url:
+        print("PostgreSQL URL not found.")
+        return
+
     try:
+        # Connect to PostgreSQL
         conn = psycopg2.connect(postgres_url)
         print("Connection successful")
+        cursor = conn.cursor()
 
-        cursor = conn.cursor()            
+        # Create a table to store channel subscribers
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS channel_subscribers (
+            channel_id TEXT PRIMARY KEY,
+            subscribers integer
+        )
+        """
+        )
+        conn.commit()
+        print("Table created successfully.")
+
+        # Get the channel IDs from the database
+        cursor.execute("""SELECT DISTINCT channel_id FROM youtube_videos""")
+        channel_ids = cursor.fetchall()
+        channel_ids = [channel_id[0] for channel_id in channel_ids]
+
+        print(f"Found {len(channel_ids)} unique channel IDs")
+
+        if channel_ids:
+            batch_insert_subscribers(channel_ids, postgres_url)
+        else:
+            print("No channel IDs found in the database.")
+
     except Exception as e:
-        print(f"Connection failed: {e}")
-else:
-    print("PostgreSQL URL not found.")
-if postgres_url:
-    try:
-        conn = psycopg2.connect(postgres_url)
-        print("Connection successful")
+        print(f"Database connection failed: {e}")
+    finally:
+        if "cursor" in locals():
+            cursor.close()
+        if "conn" in locals():
+            conn.close()
+        print("Database connection closed.")
 
-        cursor = conn.cursor()            
-    except Exception as e:
-        print(f"Connection failed: {e}")
-else:
-    print("PostgreSQL URL not found.")
 
-# Create a table to store YouTube transcripts
-
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS channel_subscribers (
-    channel_id TEXT PRIMARY KEY,
-    subscribers integer
-    )
-''')
-
-conn.commit()
-
-print("Table created successfully.")
-
-# Get the video IDs from the database
-cursor.execute('''SELECT DISTINCT channel_id
-FROM youtube_videos v
-''')
-channel_ids = cursor.fetchall()
-channel_ids = [channel_id[0] for channel_id in channel_ids]
-
-if channel_ids:
-    batch_insert_subscribers(channel_ids, postgres_url)
+if __name__ == "__main__":
+    main()

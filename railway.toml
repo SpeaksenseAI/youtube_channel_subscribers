@@ -1,0 +1,9 @@
+# railway.toml
+
+# Run daily at 12:00 UTC (covers 8am during EDT)
+[cron."daily-8am-utc12"]
+schedule = "0 12 * * *"
+
+# Run daily at 13:00 UTC (covers 8am during EST)
+[cron."daily-8am-utc13"]
+schedule = "0 13 * * *"
