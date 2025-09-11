@@ -40,6 +40,7 @@ def batch_insert_subscribers(channel_ids, postgres_url):
 
     # Prepare the records
     records = []
+    skipped_count = 0
     for channel_id in channel_ids:
         try:
             subs = get_subscribers(channel_id)
@@ -47,27 +48,43 @@ def batch_insert_subscribers(channel_ids, postgres_url):
             print(f"Error getting subscribers for {channel_id}: {e}")
             subs = None
 
+        # Skip updates for errors (None) or zero subscribers
+        if subs is None:
+            print(f"Skipping update for {channel_id}: API error or no data")
+            skipped_count += 1
+            continue
+        elif subs == 0:
+            print(f"Skipping update for {channel_id}: zero subscribers")
+            skipped_count += 1
+            continue
+
         records.append((channel_id, subs))
 
-    # Insert into the database in batch
-    query = """
-        INSERT INTO channel_subscribers (
-            channel_id, subscribers
-        )
-        VALUES (%s, %s)
-        ON CONFLICT (channel_id) DO UPDATE
-        SET 
-            subscribers = EXCLUDED.subscribers
-    """
-    try:
-        cursor.executemany(query, records)
-        conn.commit()
-        print(f"Inserted/Updated {cursor.rowcount} rows.")
-    except Exception as e:
-        print(f"Error during batch insert: {e}")
-    finally:
-        cursor.close()
-        conn.close()
+    print(f"Skipped {skipped_count} channels due to errors or zero subscribers")
+
+    # Insert into the database in batch (only if we have valid records)
+    if records:
+        query = """
+            INSERT INTO channel_subscribers (
+                channel_id, subscribers
+            )
+            VALUES (%s, %s)
+            ON CONFLICT (channel_id) DO UPDATE
+            SET 
+                subscribers = EXCLUDED.subscribers
+        """
+        try:
+            cursor.executemany(query, records)
+            conn.commit()
+            print(f"Inserted/Updated {cursor.rowcount} rows.")
+        except Exception as e:
+            print(f"Error during batch insert: {e}")
+    else:
+        print("No valid records to insert - all channels were skipped")
+
+    # Always clean up database connections
+    cursor.close()
+    conn.close()
 
 
 def main():
